@@ -97,31 +97,11 @@ export const useModelStore = create<ModelStore>()(
     },
 
     //  新增模型逻辑
+    //  注意：request 拦截器成功时已把响应解包成 data 并在业务失败时 reject，
+    //  所以这里 resolve 即保存成功；失败必须把错误抛给调用方（由组件统一弹 toast），
+    //  之前在这里吞掉异常导致组件永远弹「保存成功」+ 拦截器红 toast 同时出现。
     addNewModel: async (providerId: string, modelId: string) => {
-      try {
-        const res = await addModel({ provider_id: providerId, model_name: modelId })
-
-        if (res.code === 0) {
-          console.log('新增模型成功:', modelId)
-          set((state) => ({
-            models: [
-              ...state.models,
-              {
-                id: modelId,
-                created: Date.now(),
-                object: 'model',
-                owned_by: '',
-                permission: '',
-                root: '',
-              },
-            ],
-          }))
-        } else {
-          console.error('新增模型失败', res.msg)
-        }
-      } catch (error) {
-        console.error('添加模型出错', error)
-      }
+      await addModel({ provider_id: providerId, model_name: modelId }, { silent: true })
     },
 
     //  删除模型

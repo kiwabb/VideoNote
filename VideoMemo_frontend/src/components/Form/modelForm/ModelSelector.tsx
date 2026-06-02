@@ -13,9 +13,11 @@ import toast from 'react-hot-toast'
 
 interface ModelSelectorProps {
   providerId: string
+  /** 保存模型成功后的回调（父组件用来刷新「已启用模型」列表） */
+  onSaved?: () => void
 }
 
-export function ModelSelector({ providerId }: ModelSelectorProps) {
+export function ModelSelector({ providerId, onSaved }: ModelSelectorProps) {
   const { models, loading, selectedModel, loadModels, setSelectedModel, addNewModel } =
     useModelStore()
   const [search, setSearch] = useState('')
@@ -41,31 +43,22 @@ export function ModelSelector({ providerId }: ModelSelectorProps) {
     try {
       setSubmitting(true)
       await addNewModel(providerId, selectedModel)
+      // addNewModel 失败会 reject（服务层 silent，不会有拦截器红 toast），
+      // 成功/失败只在这里各弹一次，不再出现红绿 toast 同时出现的问题。
       toast.success('保存模型成功 🎉')
-    } catch (error) {
-      toast.error('保存失败')
+      onSaved?.()
+    } catch (e: any) {
+      toast.error(e?.msg || '保存模型失败')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2 font-bold">
-        <span>选择模型</span>
-        <Button
-          variant="ghost"
-          type="button"
-          onClick={() => loadModels(providerId)}
-          disabled={loading}
-        >
-          {loading ? '加载中...' : '刷新模型'}
-        </Button>
-      </div>
-
+    <div className="flex items-center gap-2">
       <Select value={selectedModel} onValueChange={setSelectedModel}>
         <SelectTrigger className="w-[300px]">
-          <SelectValue placeholder="请选择模型" />
+          <SelectValue placeholder={loading ? '加载模型中...' : '请选择模型'} />
         </SelectTrigger>
         <SelectContent>
           <div className="p-2">
@@ -86,6 +79,14 @@ export function ModelSelector({ providerId }: ModelSelectorProps) {
 
       <Button onClick={handleSubmit} disabled={submitting || !selectedModel}>
         {submitting ? '保存中...' : '保存模型'}
+      </Button>
+      <Button
+        variant="ghost"
+        type="button"
+        onClick={() => loadModels(providerId)}
+        disabled={loading}
+      >
+        {loading ? '加载中...' : '刷新'}
       </Button>
     </div>
   )

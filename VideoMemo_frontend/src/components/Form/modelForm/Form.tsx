@@ -40,12 +40,6 @@ const ProviderSchema = z.object({
 
 type ProviderFormValues = z.infer<typeof ProviderSchema>
 
-// ✅ Model表单schema
-const ModelSchema = z.object({
-  modelName: z.string().min(1, '请选择或填写模型名称'),
-})
-
-type ModelFormValues = z.infer<typeof ModelSchema>
 interface IModel {
   id: string
   created: number
@@ -67,6 +61,7 @@ const ProviderForm = ({ isCreate = false }: { isCreate?: boolean }) => {
   const [testing, setTesting] = useState(false)
   const [isBuiltIn, setIsBuiltIn] = useState(false)
   const loadModelsById= useModelStore(state => state.loadModelsById)
+  const loadModels = useModelStore(state => state.loadModels)
   const [modelOptions, setModelOptions] = useState<IModel[]>([]) // ⚡新增，保存模型列表
   const [models, setModels]= useState([])
   const [modelLoading, setModelLoading] = useState(false)
@@ -88,13 +83,6 @@ const ProviderForm = ({ isCreate = false }: { isCreate?: boolean }) => {
     const keywords = search.trim().toLowerCase().split(/\s+/) // 支持多个关键词
     const target = model.id.toLowerCase()
     return keywords.every(kw => target.includes(kw))
-  })
-
-  const modelForm = useForm<ModelFormValues>({
-    resolver: zodResolver(ModelSchema),
-    defaultValues: {
-      modelName: '',
-    },
   })
 
   useEffect(() => {
@@ -124,15 +112,19 @@ const ProviderForm = ({ isCreate = false }: { isCreate?: boolean }) => {
     }
     load()
   }, [id])
+  // 刷新「已启用模型」列表
+  const refreshEnabledModels = async () => {
+    const list = await loadModelsById(id!)
+    if (list) setModels(list)
+  }
+
   const handelDelete=async (modelId)=>{
     if (!window.confirm('确定要删除这个模型吗？')) return
 
     try {
-      const res = await deleteModelById(modelId)
-      console.log('🔧 删除结果:', res)
-
+      await deleteModelById(modelId)
       toast.success('删除成功')
-
+      await refreshEnabledModels()
     } catch (e) {
       toast.error('删除异常')
     }
@@ -189,30 +181,25 @@ const ProviderForm = ({ isCreate = false }: { isCreate?: boolean }) => {
     }
   }
 
-  // 保存Provider信息
+  // 保存Provider信息：保存成功后自动拉取模型列表，省去手动点「刷新模型」
   const onProviderSubmit = async (values: ProviderFormValues) => {
     if (isEditMode) {
       await updateProvider({ ...values, id: id! })
       toast.success('更新供应商成功')
+      providerForm.reset(values) // 清除 dirty 状态
+      loadModels(id!) // 用刚保存的 API Key 自动加载模型列表
     } else {
-       id = await addNewProvider({ ...values })
-
+      const created = (await addNewProvider({ ...values })) as any
       toast.success('新增供应商成功')
+      // 跳到编辑页：模型选择区随之出现并自动加载模型列表
+      if (created?.id) navigate(`/settings/model/${created.id}`)
     }
-    // 刷新页面
-
-  }
-
-  // 保存Model信息
-  const onModelSubmit = async (values: ModelFormValues) => {
-    toast.success(`保存模型: ${values.modelName}`)
-    await loadModelsById(id!)
   }
 
   if (loading) return <div className="p-4">加载中...</div>
 
   return (
-    <div className="flex flex-col gap-8 p-4">
+    <div className="flex flex-col gap-4 p-4">
       {/* Provider信息表单 */}
       <Form {...providerForm}>
         <form
@@ -290,49 +277,41 @@ const ProviderForm = ({ isCreate = false }: { isCreate?: boolean }) => {
         </form>
       </Form>
 
-      {/* 模型信息表单 */}
-      <div className="flex max-w-xl flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <span className="font-bold">模型列表</span>
-          <div className={'flex flex-col gap-2 rounded bg-[#FEF0F0] p-2.5'}>
-            <h2 className={'font-bold'}>注意!</h2>
-            <span>请确保已经保存供应商信息,以及通过测试连通性.</span>
+      {/* 模型选择：紧跟供应商表单（保存供应商后自动加载模型列表） */}
+      {isEditMode && (
+        <div className="flex max-w-xl flex-col gap-3">
+          <div className="flex items-center gap-4">
+            <span className="w-24 shrink-0 text-right text-sm font-medium">模型</span>
+            <ModelSelector providerId={id!} onSaved={refreshEnabledModels} />
           </div>
-          <ModelSelector providerId={id!} />
-
-          {/*<datalist id="model-options">*/}
-          {/*  {modelOptions.map(model => (*/}
-          {/*    <option key={model.id + '1'} value={model.id} />*/}
-          {/*  ))}*/}
-          {/*</datalist>*/}
-        </div>
-        <div className="flex flex-col gap-2">
-          <span className="font-bold">已启用模型</span>
-          <div className={'flex flex-wrap gap-2 rounded  p-2.5'}>
-            {
-              models && models.map(model => {
-                return (
-                  <span key={model.id} className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-sm text-blue-700">
+          <div className="flex items-start gap-4">
+            <span className="w-24 shrink-0 text-right text-sm font-medium">已启用</span>
+            <div className="flex flex-1 flex-wrap gap-2">
+              {models && models.length > 0 ? (
+                models.map(model => (
+                  <span
+                    key={model.id}
+                    className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-sm text-blue-700"
+                  >
                     {model.model_name}
-                    <button type="button" onClick={() => handelDelete(model.id)} className="hover:text-blue-900">
+                    <button
+                      type="button"
+                      onClick={() => handelDelete(model.id)}
+                      className="hover:text-blue-900"
+                    >
                       <X className="h-3 w-3" />
                     </button>
                   </span>
-
-                )
-              })
-            }
-
+                ))
+              ) : (
+                <span className="text-sm text-neutral-400">
+                  暂无启用模型，从上方选择模型后点「保存模型」
+                </span>
+              )}
+            </div>
           </div>
-          {/*<ModelSelector providerId={id!} />*/}
-
-          {/*<datalist id="model-options">*/}
-          {/*  {modelOptions.map(model => (*/}
-          {/*    <option key={model.id + '1'} value={model.id} />*/}
-          {/*  ))}*/}
-          {/*</datalist>*/}
         </div>
-      </div>
+      )}
     </div>
   )
 }
