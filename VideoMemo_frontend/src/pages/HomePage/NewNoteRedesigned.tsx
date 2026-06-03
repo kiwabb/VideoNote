@@ -56,33 +56,95 @@ const STEP_DEFS = [
   { key: 'SUCCESS', zhKey: 'step_done', icon: <Check size={18} /> },
 ]
 
+/* -------------------- 未运行草稿持久化 -------------------- */
+// 新建笔记表单内容自动存 localStorage：切走页面再回来（组件重挂载）恢复上次还没提交运行的内容；
+// 提交成功后清除。
+const DRAFT_KEY = 'vm-note-draft'
+interface NoteDraft {
+  platform?: string
+  url?: string
+  modelName?: string
+  style?: string
+  quality?: string
+  formats?: string[]
+  vision?: boolean
+  intervalSec?: number | ''
+  cols?: number
+  rows?: number
+  extras?: string
+}
+function loadDraft(): NoteDraft {
+  try {
+    const s = localStorage.getItem(DRAFT_KEY)
+    return s ? (JSON.parse(s) as NoteDraft) : {}
+  } catch {
+    return {}
+  }
+}
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 const NewNoteRedesigned: FC = () => {
   const lang = useVmLang()
   const navigate = useNavigate()
   const addPendingTask = useTaskStore(s => s.addPendingTask)
+  const tasks = useTaskStore(s => s.tasks)
   const { modelList, loadEnabledModels } = useModelStore()
+
+  // 上次未运行的草稿（组件重挂载时读取一次，用于初始化各表单字段）
+  const draft = useMemo(() => loadDraft(), [])
 
   const [customPlatformList, setCustomPlatformList] = useState(() => getCustomPlatforms())
   const [view, setView] = useState<'form' | 'flow'>('form')
 
-  const [platform, setPlatform] = useState('bilibili')
+  const [platform, setPlatform] = useState(draft.platform ?? 'bilibili')
   const [touchedPf, setTouchedPf] = useState(false)
-  const [url, setUrl] = useState('')
-  const [modelName, setModelName] = useState('')
-  const [style, setStyle] = useState('minimal')
-  const [quality, setQuality] = useState('medium')
+  const [url, setUrl] = useState(draft.url ?? '')
+  const [modelName, setModelName] = useState(draft.modelName ?? '')
+  const [style, setStyle] = useState(draft.style ?? 'minimal')
+  const [quality, setQuality] = useState(draft.quality ?? 'medium')
   // 默认只勾「目录 / AI 总结」，跟原本的 NoteForm 一致。
   // 「原片跳转」（link）会让 LLM 改用线性时间组织内容，破坏概念分组的笔记结构，
   // 所以保持需要用户主动勾选。截图依赖视频理解，没开 vision 之前保持关闭。
-  const [formats, setFormats] = useState<string[]>(['toc', 'summary'])
-  const [vision, setVision] = useState(false)
-  const [intervalSec, setIntervalSec] = useState(6)
-  const [cols, setCols] = useState(2)
-  const [rows, setRows] = useState(2)
-  const [extras, setExtras] = useState('')
+  const [formats, setFormats] = useState<string[]>(draft.formats ?? ['toc', 'summary'])
+  const [vision, setVision] = useState(draft.vision ?? false)
+  // 采样间隔默认 30s，上限 300s；用 number | '' 允许删空后重新输入
+  const [intervalSec, setIntervalSec] = useState<number | ''>(draft.intervalSec ?? 30)
+  const [cols, setCols] = useState(draft.cols ?? 2)
+  const [rows, setRows] = useState(draft.rows ?? 2)
+  const [extras, setExtras] = useState(draft.extras ?? '')
   const [isUploading, setIsUploading] = useState(false)
   const [uploadOk, setUploadOk] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [showHist, setShowHist] = useState(false)
+
+  // 上一次输入过的视频链接（只取最新一条，非本地），用于链接输入框下拉提示
+  const urlHistory = useMemo(() => {
+    for (const t of tasks) {
+      const u = (t.formData?.video_url || '').trim()
+      if (!u || t.formData?.platform === 'local') continue
+      return [u]
+    }
+    return []
+  }, [tasks])
+
+  // 草稿自动保存：表单任何字段变化都写入 localStorage（flow 阶段不再保存）
+  useEffect(() => {
+    if (view !== 'form') return
+    try {
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({ platform, url, modelName, style, quality, formats, vision, intervalSec, cols, rows, extras }),
+      )
+    } catch {
+      /* ignore quota / 隐私模式异常 */
+    }
+  }, [view, platform, url, modelName, style, quality, formats, vision, intervalSec, cols, rows, extras])
 
   useEffect(() => {
     loadEnabledModels()
@@ -162,12 +224,14 @@ const NewNoteRedesigned: FC = () => {
       style,
       extras,
       video_understanding: vision,
-      video_interval: intervalSec,
+      // 采样间隔留空时兜底为默认 30 秒
+      video_interval: intervalSec === '' ? 30 : intervalSec,
       grid_size: [cols, rows] as [number, number],
     }
     try {
       const data: any = await generateNote(payload as any)
       addPendingTask(data.task_id, platform, payload as any)
+      clearDraft() // 已提交运行，清除未运行草稿
     } catch (e: any) {
       if (e?.data?.reason === 'transcriber_model_not_ready') {
         const downloading = e?.data?.downloading
@@ -250,7 +314,56 @@ const NewNoteRedesigned: FC = () => {
                 placeholder={trVm('pasteLink', lang)}
                 value={url}
                 onChange={e => setUrl(e.target.value)}
+                onFocus={() => setShowHist(true)}
+                // 延迟关闭，确保点击下拉项的 onMouseDown/onClick 能先触发
+                onBlur={() => window.setTimeout(() => setShowHist(false), 150)}
               />
+              {/* 历史链接下拉：自定义浮层，左右对齐输入框 */}
+              {showHist && urlHistory.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    left: 0,
+                    right: 0,
+                    zIndex: 30,
+                    background: 'var(--vm-surface)',
+                    border: '1px solid var(--vm-border)',
+                    borderRadius: 'var(--vm-radius-sm)',
+                    boxShadow: '0 8px 24px rgba(0,0,0,.12)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {urlHistory.map(u => (
+                    <div
+                      key={u}
+                      // 用 onMouseDown 抢在 input onBlur 之前执行，避免点击丢失
+                      onMouseDown={e => {
+                        e.preventDefault()
+                        setUrl(u)
+                        setShowHist(false)
+                      }}
+                      title={u}
+                      style={{
+                        padding: '9px 12px',
+                        fontSize: 12.5,
+                        fontFamily: 'var(--vm-mono, monospace)',
+                        color: 'var(--vm-text)',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      onMouseEnter={e =>
+                        (e.currentTarget.style.background = 'var(--vm-surface-2)')
+                      }
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      {u}
+                    </div>
+                  ))}
+                </div>
+              )}
               {detectedShow && (
                 <span
                   className="vm-badge vm-badge-ok"
@@ -425,9 +538,22 @@ const NewNoteRedesigned: FC = () => {
                   className="vm-input"
                   type="number"
                   min={1}
-                  max={30}
+                  max={300}
+                  step={1}
                   value={intervalSec}
-                  onChange={e => setIntervalSec(+e.target.value || 6)}
+                  onChange={e => {
+                    const raw = e.target.value
+                    if (raw === '') {
+                      // 允许删空后重新输入，不再立刻回弹成默认值
+                      setIntervalSec('')
+                      return
+                    }
+                    let n = Number(raw)
+                    if (Number.isNaN(n)) return
+                    if (n > 300) n = 300
+                    if (n < 1) n = 1
+                    setIntervalSec(n)
+                  }}
                 />
               </Field>
               <Field label={trVm('grid', lang)}>

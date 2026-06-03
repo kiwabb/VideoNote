@@ -1,8 +1,10 @@
 import { FC, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ExternalLink, Eye, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { ExternalLink, Eye, FolderPlus, MoreVertical, Plus, RotateCcw, Search, Star, StarOff, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useTaskStore, type Task } from '@/store/taskStore'
+import { useCollectionStore } from '@/store/collectionStore'
+import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu'
 import { Pf, PLATFORMS } from '@/components/design/PlatformAvatar'
 import { StatusBadge } from '@/components/design/StatusBadge'
 import { EmptyTasksArt } from '@/components/design/animations'
@@ -69,7 +71,15 @@ const TaskList: FC = () => {
   const removeTask = useTaskStore(s => s.removeTask)
   const retryTask = useTaskStore(s => s.retryTask)
 
+  const favoriteNoteIds = useCollectionStore(s => s.favoriteNoteIds)
+  const toggleFavorite = useCollectionStore(s => s.toggleFavorite)
+  const removeFavorite = useCollectionStore(s => s.removeFavorite)
+  const collections = useCollectionStore(s => s.collections)
+  const setCollectionNotes = useCollectionStore(s => s.setCollectionNotes)
+
   const [filter, setFilter] = useState<'all' | 'RUNNING' | 'SUCCESS' | 'FAILED'>('all')
+  const [search, setSearch] = useState('')
+  const [menu, setMenu] = useState<{ x: number; y: number; taskId: string } | null>(null)
 
   const counts = useMemo(() => {
     const c = { all: tasks.length, RUNNING: 0, SUCCESS: 0, FAILED: 0 }
@@ -80,14 +90,110 @@ const TaskList: FC = () => {
     return c
   }, [tasks])
 
-  const shown = useMemo(
-    () => (filter === 'all' ? tasks : tasks.filter(t => statusText(t.status) === filter)),
-    [tasks, filter],
-  )
+  // 把一行的全部可见字段拼成一个可搜索字符串，支持「全部列」查询
+  const haystackOf = (t: Task): string => {
+    const platform = platformOf(t)
+    const styleVal = (t.formData as any)?.style || ''
+    const styleLabel = noteStyles.find(s => s.value === styleVal)?.label || ''
+    return [
+      (t.audioMeta as any)?.title || '',
+      t.formData?.video_url || '',
+      platform,
+      PLATFORMS[platform]?.[lang] || '',
+      t.formData?.model_name || '',
+      styleLabel,
+      statusText(t.status),
+      t.totalTokens ? String(t.totalTokens) : '',
+      formatTime(t.createdAt),
+      formatTime(t.completedAt),
+    ]
+      .join(' ')
+      .toLowerCase()
+  }
+
+  const shown = useMemo(() => {
+    const byStatus =
+      filter === 'all' ? tasks : tasks.filter(t => statusText(t.status) === filter)
+    const kw = search.trim().toLowerCase()
+    if (!kw) return byStatus
+    return byStatus.filter(t => haystackOf(t).includes(kw))
+  }, [tasks, filter, search, lang])
 
   const handleView = (id: string) => {
     setCurrentTask(id)
     navigate('/')
+  }
+
+  const addToCollection = (collectionId: string, noteId: string) => {
+    const c = collections.find(x => x.id === collectionId)
+    if (!c) return
+    if (c.noteIds.includes(noteId)) {
+      toast(lang === 'zh' ? '已在该分组中' : 'Already in this group')
+      return
+    }
+    setCollectionNotes(collectionId, [...c.noteIds, noteId])
+    toast.success(lang === 'zh' ? `已加入「${c.name}」` : `Added to "${c.name}"`)
+  }
+
+  // 右键菜单项：收藏 / 加入分组(子菜单) / 删除
+  const buildMenuItems = (taskId: string): ContextMenuItem[] => {
+    const isFav = favoriteNoteIds.includes(taskId)
+    const groupChildren: ContextMenuItem[] =
+      collections.length > 0
+        ? collections.map(c => ({
+            key: c.id,
+            label: c.name,
+            icon: <FolderPlus className="h-4 w-4" />,
+            disabled: c.noteIds.includes(taskId),
+            onClick: () => addToCollection(c.id, taskId),
+          }))
+        : [
+            {
+              key: '__new__',
+              label: lang === 'zh' ? '暂无分组，去新建…' : 'No groups — create…',
+              onClick: () => navigate('/collections'),
+            },
+          ]
+    return [
+      {
+        key: 'view',
+        label: lang === 'zh' ? '查看笔记' : 'Open note',
+        icon: <Eye className="h-4 w-4" />,
+        onClick: () => handleView(taskId),
+      },
+      {
+        key: 'fav',
+        label: isFav
+          ? lang === 'zh' ? '取消收藏' : 'Unfavorite'
+          : lang === 'zh' ? '收藏' : 'Favorite',
+        icon: isFav ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />,
+        onClick: () => {
+          toggleFavorite(taskId)
+          toast.success(
+            isFav
+              ? lang === 'zh' ? '已取消收藏' : 'Removed from favorites'
+              : lang === 'zh' ? '已加入收藏' : 'Added to favorites',
+          )
+        },
+      },
+      {
+        key: 'group',
+        label: lang === 'zh' ? '加入分组' : 'Add to group',
+        icon: <FolderPlus className="h-4 w-4" />,
+        children: groupChildren,
+      },
+      {
+        key: 'del',
+        label: lang === 'zh' ? '删除' : 'Delete',
+        icon: <Trash2 className="h-4 w-4" />,
+        danger: true,
+        onClick: () => {
+          removeFavorite(taskId)
+          removeTask(taskId)
+          toast.success(lang === 'zh' ? '已删除任务' : 'Removed')
+        },
+      },
+    ]
   }
 
   const chips: { id: 'all' | 'RUNNING' | 'SUCCESS' | 'FAILED'; label: string; n: number }[] = [
@@ -114,6 +220,16 @@ const TaskList: FC = () => {
               </span>
             </button>
           ))}
+        </div>
+
+        {/* 全部列查询 */}
+        <div className="vm-note-search" style={{ maxWidth: 280, flex: 1, marginLeft: 12 }}>
+          <Search size={16} />
+          <input
+            placeholder={trVm('searchAllCols', lang)}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
       </div>
 
@@ -157,6 +273,7 @@ const TaskList: FC = () => {
                   <th style={{ textAlign: 'right' }}>{trVm('colTokens', lang)}</th>
                   <th>{trVm('colStyle', lang)}</th>
                   <th>{trVm('colCreated', lang)}</th>
+                  <th>{trVm('colCompleted', lang)}</th>
                   <th style={{ textAlign: 'right' }}>{trVm('colActions', lang)}</th>
                 </tr>
               </thead>
@@ -170,7 +287,15 @@ const TaskList: FC = () => {
                   const isRunning = statusText(t.status) === 'RUNNING'
                   const step = isRunning ? runningStep(t) : null
                   return (
-                    <tr key={t.id}>
+                    <tr
+                      key={t.id}
+                      onClick={() => handleView(t.id)}
+                      onContextMenu={e => {
+                        e.preventDefault()
+                        setMenu({ x: e.clientX, y: e.clientY, taskId: t.id })
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
                       <td style={{ maxWidth: 320 }}>
                         <div
                           style={{
@@ -188,6 +313,7 @@ const TaskList: FC = () => {
                             href={url}
                             target="_blank"
                             rel="noreferrer"
+                            onClick={e => e.stopPropagation()}
                             style={{
                               fontSize: 12,
                               display: 'flex',
@@ -275,19 +401,37 @@ const TaskList: FC = () => {
                       <td className="vm-muted vm-mono" style={{ fontSize: 12.5 }}>
                         {formatTime(t.createdAt)}
                       </td>
+                      <td className="vm-muted vm-mono" style={{ fontSize: 12.5 }}>
+                        {statusText(t.status) === 'SUCCESS' ? formatTime(t.completedAt) : '—'}
+                      </td>
                       <td>
                         <div className="vm-row" style={{ gap: 2, justifyContent: 'flex-end' }}>
                           <button
                             className="vm-icon-btn"
+                            title={lang === 'zh' ? '更多（收藏 / 加入分组）' : 'More'}
+                            onClick={e => {
+                              e.stopPropagation()
+                              const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                              setMenu({ x: r.right + 4, y: r.top, taskId: t.id })
+                            }}
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                          <button
+                            className="vm-icon-btn"
                             title={trVm('view', lang)}
-                            onClick={() => handleView(t.id)}
+                            onClick={e => {
+                              e.stopPropagation()
+                              handleView(t.id)
+                            }}
                           >
                             <Eye size={17} />
                           </button>
                           <button
                             className="vm-icon-btn"
                             title={trVm('retry', lang)}
-                            onClick={() => {
+                            onClick={e => {
+                              e.stopPropagation()
                               retryTask(t.id)
                               toast.success(lang === 'zh' ? '已重新提交任务' : 'Resubmitted')
                             }}
@@ -297,7 +441,8 @@ const TaskList: FC = () => {
                           <button
                             className="vm-icon-btn"
                             title={trVm('del', lang)}
-                            onClick={() => {
+                            onClick={e => {
+                              e.stopPropagation()
                               removeTask(t.id)
                               toast.success(lang === 'zh' ? '已删除任务' : 'Removed')
                             }}
@@ -313,6 +458,16 @@ const TaskList: FC = () => {
             </table>
           </div>
         </div>
+      )}
+
+      {/* 行右键菜单：查看 / 收藏 / 加入分组 / 删除 */}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={buildMenuItems(menu.taskId)}
+          onClose={() => setMenu(null)}
+        />
       )}
     </div>
   )

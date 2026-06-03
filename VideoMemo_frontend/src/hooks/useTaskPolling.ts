@@ -39,6 +39,7 @@ export const useTaskPolling = (interval = 3000) => {
               audioMeta: result.audio_meta,
               totalTokens: result.total_tokens,
               paused: false,
+              completedAt: new Date().toISOString(), // 补记完成时间
             })
             toast.success('笔记生成成功')
           } else if (status === 'FAILED' && status !== task.status) {

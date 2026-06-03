@@ -45,6 +45,7 @@ import 'katex/dist/katex.min.css'
 import 'github-markdown-css/github-markdown-light.css'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import { useTaskStore } from '@/store/taskStore'
+import { buildVideoTimestampUrl } from '@/utils/platform'
 import { noteStyles } from '@/constant/note.ts'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
@@ -78,9 +79,13 @@ const rehypePlugins = [rehypeKatex, rehypeSlug]
 
 /**
  * 构建 ReactMarkdown components 对象，baseURL 用于修正图片路径。
+ * videoCtx 提供当前笔记的原始视频链接与平台，用于截图下方的「跳转原片」链接。
  * 使用函数 + useMemo 避免每次渲染都创建新的函数实例。
  */
-function createMarkdownComponents(baseURL: string) {
+function createMarkdownComponents(
+  baseURL: string,
+  videoCtx?: { url?: string; platform?: string },
+) {
   return {
     h1: ({ children, ...props }: any) => (
       <h1
@@ -214,11 +219,24 @@ function createMarkdownComponents(baseURL: string) {
       // 绕过 CDN 的 Referer 校验。与左侧 NoteThumb 同一招。
       props.src = src
 
+      // 截图的 alt 里带「原片 @ mm:ss」（后端 _insert_screenshots 写入），
+      // 据此在图片下方生成「跳转原片对应时间点」的链接。
+      const alt: string = props.alt || ''
+      const tsMatch = alt.match(/原片 @ (\d{1,2}):(\d{2})/)
+      let jumpUrl = ''
+      let timeText = ''
+      if (tsMatch && videoCtx?.url) {
+        timeText = `${tsMatch[1]}:${tsMatch[2]}`
+        const seconds = parseInt(tsMatch[1], 10) * 60 + parseInt(tsMatch[2], 10)
+        jumpUrl = buildVideoTimestampUrl(videoCtx.url, videoCtx.platform, seconds)
+      }
+
       return (
-        <div className="my-8 flex justify-center">
+        <div className="my-8 flex flex-col items-center gap-2">
           <Zoom>
             <img
               {...props}
+              alt=""
               referrerPolicy="no-referrer"
               crossOrigin="anonymous"
               className="max-w-full cursor-zoom-in rounded-lg object-cover shadow-md transition-all hover:shadow-lg"
@@ -229,6 +247,18 @@ function createMarkdownComponents(baseURL: string) {
               }}
             />
           </Zoom>
+          {jumpUrl && (
+            <a
+              href={jumpUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={jumpUrl}
+              className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100"
+            >
+              <Play className="h-3 w-3" />
+              <span>跳转原片（{timeText}）</span>
+            </a>
+          )}
         </div>
       )
     },
@@ -394,8 +424,14 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
   const svgRef = useRef<SVGSVGElement>(null)
 
-  // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
-  const markdownComponents = useMemo(() => createMarkdownComponents(baseURL), [baseURL])
+  // 缓存 ReactMarkdown components，baseURL / 当前笔记视频信息变化时重建
+  const videoUrl = currentTask?.formData?.video_url || ''
+  const videoPlatform =
+    currentTask?.formData?.platform || (currentTask?.audioMeta as any)?.platform || ''
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(baseURL, { url: videoUrl, platform: videoPlatform }),
+    [baseURL, videoUrl, videoPlatform],
+  )
 
   // 多版本内容处理
   useEffect(() => {

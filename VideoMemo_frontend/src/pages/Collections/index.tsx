@@ -1,11 +1,13 @@
 import { FC, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Folder, Inbox, MoreVertical, Pencil, Plus, Share2, Trash2 } from 'lucide-react'
+import { Folder, Inbox, MoreVertical, Pencil, Plus, Share2, Star, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   useCollectionStore,
   buildUngroupedCollection,
+  buildFavoritesCollection,
   isUngroupedCollection,
+  isFavoritesCollection,
   type Collection,
 } from '@/store/collectionStore'
 import { useTaskStore } from '@/store/taskStore'
@@ -30,13 +32,23 @@ const Collections: FC = () => {
   const updateCollection = useCollectionStore(s => s.updateCollection)
   const removeCollection = useCollectionStore(s => s.removeCollection)
   const tasks = useTaskStore(s => s.tasks)
+  const favoriteNoteIds = useCollectionStore(s => s.favoriteNoteIds)
 
   const ungrouped = useMemo(() => {
     const allIds = tasks.filter(t => t.status === 'SUCCESS').map(t => t.id)
     return buildUngroupedCollection(allIds, collections)
   }, [tasks, collections])
 
-  const displayCollections = useMemo(() => [ungrouped, ...collections], [ungrouped, collections])
+  const favorites = useMemo(
+    () => buildFavoritesCollection(favoriteNoteIds, tasks.map(t => t.id)),
+    [favoriteNoteIds, tasks],
+  )
+
+  // 收藏、未分组两个内置合集固定置顶
+  const displayCollections = useMemo(
+    () => [favorites, ungrouped, ...collections],
+    [favorites, ungrouped, collections],
+  )
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Collection | null>(null)
@@ -57,7 +69,8 @@ const Collections: FC = () => {
     toast.success(lang === 'zh' ? '已导出合集 JSON' : 'Exported collection JSON')
   }
   const menuItems = (c: Collection): ContextMenuItem[] => {
-    if (isUngroupedCollection(c.id)) {
+    // 内置合集（收藏 / 未分组）只能分享，不能编辑 / 删除
+    if (isUngroupedCollection(c.id) || isFavoritesCollection(c.id)) {
       return [{ key: 'share', label: lang === 'zh' ? '分享' : 'Share', icon: <Share2 className="h-4 w-4" />, onClick: () => handleShare(c) }]
     }
     return [
@@ -91,7 +104,9 @@ const Collections: FC = () => {
       <div className="vm-coll-grid">
         {displayCollections.map(c => {
           const isUngrouped = isUngroupedCollection(c.id)
-          const color = isUngrouped ? '#94A3B8' : coverColor(c.id)
+          const isFavorites = isFavoritesCollection(c.id)
+          const isBuiltin = isUngrouped || isFavorites
+          const color = isFavorites ? '#F59E0B' : isUngrouped ? '#94A3B8' : coverColor(c.id)
           const bg = isUngrouped
             ? 'var(--vm-surface-3)'
             : `linear-gradient(135deg, ${color}, color-mix(in srgb, ${color} 55%, #000))`
@@ -125,12 +140,14 @@ const Collections: FC = () => {
                       objectFit: 'cover',
                     }}
                   />
+                ) : isFavorites ? (
+                  <Star size={34} fill="#fff" />
                 ) : isUngrouped ? (
                   <Inbox size={34} />
                 ) : (
                   <Folder size={34} />
                 )}
-                {!isUngrouped && (
+                {!isBuiltin && (
                   <button
                     className="vm-icon-btn"
                     style={{
@@ -145,7 +162,7 @@ const Collections: FC = () => {
                     onClick={e => {
                       e.stopPropagation()
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                      setMenu({ x: rect.right - 140, y: rect.bottom + 4, collection: c })
+                      setMenu({ x: rect.right + 4, y: rect.top, collection: c })
                     }}
                   >
                     <MoreVertical size={15} />
@@ -160,7 +177,7 @@ const Collections: FC = () => {
                   <span className="vm-badge vm-badge-neutral">
                     {count} {trVm('notesCount', lang)}
                   </span>
-                  {!isUngrouped &&
+                  {!isBuiltin &&
                     c.tags.map(tag => (
                       <span
                         key={tag}
@@ -173,7 +190,7 @@ const Collections: FC = () => {
                         #{tag}
                       </span>
                     ))}
-                  {isUngrouped && (
+                  {isBuiltin && (
                     <span className="vm-badge vm-badge-neutral" style={{ fontSize: 10.5 }}>
                       {lang === 'zh' ? '自动' : 'auto'}
                     </span>

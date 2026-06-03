@@ -1104,9 +1104,66 @@ body[data-theme='mono'] {
   cursor: pointer;
   border: 1px solid transparent;
   transition: background 0.14s, border-color 0.14s;
+  position: relative;
 }
 .vm-note-card:hover {
   background: var(--vm-surface-2);
+}
+/* 卡片右侧操作列：收藏在上、删除在下，纯图标无描边无底色，不与文字重叠 */
+.vm-card-actions-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.vm-card-act {
+  padding: 1px;
+  border: none;
+  background: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  line-height: 0;
+  transition: color 0.14s;
+}
+/* 收藏：亮黄色 */
+.vm-card-fav {
+  color: #fbbf24;
+}
+/* 删除：浅灰带透明度，hover 转危险色 */
+.vm-card-del {
+  color: color-mix(in srgb, var(--vm-faint) 55%, transparent);
+}
+.vm-card-del:hover {
+  color: var(--vm-danger, #e5484d);
+}
+/* 更多(⋮)：浅灰，hover 加深 */
+.vm-card-more {
+  color: color-mix(in srgb, var(--vm-faint) 65%, transparent);
+}
+.vm-card-more:hover {
+  color: var(--vm-muted);
+}
+
+/* 右键菜单/子菜单的细滚动条：内容不超高时不出现，超高时也只是一条很细的轨 */
+.vm-ctx-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--vm-border, #d4d4d4) transparent;
+}
+.vm-ctx-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.vm-ctx-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.vm-ctx-scroll::-webkit-scrollbar-thumb {
+  background: var(--vm-border, #d4d4d4);
+  border-radius: 999px;
+}
+.vm-ctx-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--vm-faint, #a3a3a3);
 }
 .vm-note-card.active {
   background: var(--vm-primary-soft);

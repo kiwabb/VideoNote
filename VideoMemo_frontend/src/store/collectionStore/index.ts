@@ -45,20 +45,54 @@ export function buildUngroupedCollection(
   }
 }
 
+/**
+ * 「收藏」内置合集 —— 不是用户自建合集，不能编辑 / 删除。
+ * 收藏关系单独持久化在 favoriteNoteIds 里（收藏=一个跨合集的标记），
+ * 展示时用 buildFavoritesCollection 拼成一个虚拟合集卡片，固定置顶。
+ */
+export const FAVORITES_COLLECTION_ID = '__favorites__'
+
+export function isFavoritesCollection(id?: string | null): boolean {
+  return id === FAVORITES_COLLECTION_ID
+}
+
+export function buildFavoritesCollection(
+  favoriteNoteIds: string[],
+  existingNoteIds: string[],
+): Collection {
+  const exist = new Set(existingNoteIds)
+  // 只保留还存在的笔记；顺序沿用收藏顺序（最近收藏在前）
+  const noteIds = favoriteNoteIds.filter(id => exist.has(id))
+  return {
+    id: FAVORITES_COLLECTION_ID,
+    name: '收藏',
+    description: '已收藏的笔记',
+    cover: '',
+    tags: [],
+    noteIds,
+    createdAt: '',
+  }
+}
+
 interface CollectionStore {
   collections: Collection[]
+  favoriteNoteIds: string[]
   addCollection: (input: CollectionInput) => void
   updateCollection: (id: string, input: CollectionInput) => void
   removeCollection: (id: string) => void
   getCollection: (id: string) => Collection | undefined
   setCollectionNotes: (id: string, noteIds: string[]) => void
   removeNoteFromCollection: (id: string, noteId: string) => void
+  isFavorite: (noteId: string) => boolean
+  toggleFavorite: (noteId: string) => void
+  removeFavorite: (noteId: string) => void
 }
 
 export const useCollectionStore = create<CollectionStore>()(
   persist(
     (set, get) => ({
       collections: [],
+      favoriteNoteIds: [],
 
       addCollection: input =>
         set(state => ({
@@ -99,6 +133,20 @@ export const useCollectionStore = create<CollectionStore>()(
           collections: state.collections.map(c =>
             c.id === id ? { ...c, noteIds: c.noteIds.filter(n => n !== noteId) } : c,
           ),
+        })),
+
+      isFavorite: noteId => get().favoriteNoteIds.includes(noteId),
+
+      toggleFavorite: noteId =>
+        set(state => ({
+          favoriteNoteIds: state.favoriteNoteIds.includes(noteId)
+            ? state.favoriteNoteIds.filter(n => n !== noteId)
+            : [noteId, ...state.favoriteNoteIds], // 最近收藏在前
+        })),
+
+      removeFavorite: noteId =>
+        set(state => ({
+          favoriteNoteIds: state.favoriteNoteIds.filter(n => n !== noteId),
         })),
     }),
     {

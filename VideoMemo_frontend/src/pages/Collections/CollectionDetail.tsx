@@ -18,7 +18,9 @@ import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import {
   useCollectionStore,
   buildUngroupedCollection,
+  buildFavoritesCollection,
   isUngroupedCollection,
+  isFavoritesCollection,
 } from '@/store/collectionStore'
 import { useTaskStore } from '@/store/taskStore'
 import {
@@ -42,18 +44,26 @@ const CollectionDetail: FC = () => {
   const updateCollection = useCollectionStore(s => s.updateCollection)
   const setCollectionNotes = useCollectionStore(s => s.setCollectionNotes)
   const removeNoteFromCollection = useCollectionStore(s => s.removeNoteFromCollection)
+  const favoriteNoteIds = useCollectionStore(s => s.favoriteNoteIds)
+  const removeFavorite = useCollectionStore(s => s.removeFavorite)
   const tasks = useTaskStore(s => s.tasks)
   const setCurrentTask = useTaskStore(s => s.setCurrentTask)
 
   const isUngrouped = isUngroupedCollection(id)
-  // 未分组：每次渲染都从 tasks - 真实合集 计算；真实合集：从 store 查
+  const isFavorites = isFavoritesCollection(id)
+  // 收藏 / 未分组都是内置合集：只读，不能编辑、不能用选择器加笔记
+  const isBuiltin = isUngrouped || isFavorites
+  // 内置合集每次渲染实时计算；真实合集从 store 查
   const collection = useMemo(() => {
+    if (isFavorites) {
+      return buildFavoritesCollection(favoriteNoteIds, tasks.map(t => t.id))
+    }
     if (isUngrouped) {
       const allIds = tasks.filter(t => t.status === 'SUCCESS').map(t => t.id)
       return buildUngroupedCollection(allIds, allCollections)
     }
     return allCollections.find(c => c.id === id)
-  }, [isUngrouped, id, tasks, allCollections])
+  }, [isFavorites, isUngrouped, id, tasks, allCollections, favoriteNoteIds])
 
   const openNote = (noteId: string) => {
     setCurrentTask(noteId)
@@ -124,7 +134,7 @@ const CollectionDetail: FC = () => {
               <span className="truncate text-xl font-semibold text-gray-800">
                 {collection.name}
               </span>
-              {isUngrouped ? (
+              {isBuiltin ? (
                 <Badge variant="outline" className="text-[10px] font-normal text-neutral-500">
                   自动
                 </Badge>
@@ -153,7 +163,7 @@ const CollectionDetail: FC = () => {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {!isUngrouped && (
+          {!isBuiltin && (
             <Button size="sm" onClick={() => setPickerOpen(true)}>
               <Plus className="h-4 w-4" />
               添加笔记
@@ -212,12 +222,18 @@ const CollectionDetail: FC = () => {
               <Library className="h-7 w-7" />
             </div>
             <div className="mt-4 text-base font-medium text-gray-700">
-              {isUngrouped ? '当前没有未分组的笔记' : '合集还是空的'}
+              {isFavorites
+                ? '还没有收藏任何笔记'
+                : isUngrouped
+                  ? '当前没有未分组的笔记'
+                  : '合集还是空的'}
             </div>
             <div className="mt-1 text-sm">
-              {isUngrouped
-                ? '所有已生成的笔记都已被归入合集；新建笔记后会自动出现在这里。'
-                : '点击「添加笔记」从历史笔记中选入'}
+              {isFavorites
+                ? '在左侧笔记列表卡片上点击星标即可收藏，收藏的笔记会出现在这里。'
+                : isUngrouped
+                  ? '所有已生成的笔记都已被归入合集；新建笔记后会自动出现在这里。'
+                  : '点击「添加笔记」从历史笔记中选入'}
             </div>
           </div>
         ) : (
@@ -259,9 +275,15 @@ const CollectionDetail: FC = () => {
                   <button
                     onClick={e => {
                       e.stopPropagation()
-                      removeNoteFromCollection(collection.id, t.id)
-                      toast.success('已移出合集')
+                      if (isFavorites) {
+                        removeFavorite(t.id)
+                        toast.success('已取消收藏')
+                      } else {
+                        removeNoteFromCollection(collection.id, t.id)
+                        toast.success('已移出合集')
+                      }
                     }}
+                    title={isFavorites ? '取消收藏' : '移出合集'}
                     className="rounded p-2 text-gray-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -273,7 +295,7 @@ const CollectionDetail: FC = () => {
         )}
       </div>
 
-      {!isUngrouped && (
+      {!isBuiltin && (
         <>
           <CollectionDialog
             open={editOpen}

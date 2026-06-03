@@ -1,10 +1,23 @@
-import { FC, ReactNode, useMemo, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { FC, MouseEvent, ReactNode, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { FolderPlus, MoreVertical, Plus, Search, Star, StarOff, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useTaskStore } from '@/store/taskStore'
+import { useCollectionStore } from '@/store/collectionStore'
 import { NoteThumb } from '@/components/design/NoteThumb'
 import { Pf } from '@/components/design/PlatformAvatar'
 import { StatusBadge } from '@/components/design/StatusBadge'
 import { useVmLang, trVm } from '@/i18n/redesign'
+import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 interface Props {
   Preview: ReactNode
@@ -19,7 +32,16 @@ const WorkspaceLayout: FC<Props> = ({ Preview }) => {
   const tasks = useTaskStore(s => s.tasks)
   const currentTaskId = useTaskStore(s => s.currentTaskId)
   const setCurrentTask = useTaskStore(s => s.setCurrentTask)
+  const removeTask = useTaskStore(s => s.removeTask)
+  const favoriteNoteIds = useCollectionStore(s => s.favoriteNoteIds)
+  const toggleFavorite = useCollectionStore(s => s.toggleFavorite)
+  const removeFavorite = useCollectionStore(s => s.removeFavorite)
+  const collections = useCollectionStore(s => s.collections)
+  const setCollectionNotes = useCollectionStore(s => s.setCollectionNotes)
+  const navigate = useNavigate()
   const [q, setQ] = useState('')
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; taskId: string } | null>(null)
 
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase()
@@ -34,6 +56,87 @@ const WorkspaceLayout: FC<Props> = ({ Preview }) => {
 
   const handleNew = () => setCurrentTask(null)
   const handleSelect = (id: string) => setCurrentTask(id)
+
+  const handleToggleFavorite = (e: MouseEvent, id: string) => {
+    e.stopPropagation()
+    const willFav = !favoriteNoteIds.includes(id)
+    toggleFavorite(id)
+    toast.success(
+      willFav
+        ? lang === 'zh' ? '已加入收藏' : 'Added to favorites'
+        : lang === 'zh' ? '已取消收藏' : 'Removed from favorites',
+    )
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    removeFavorite(pendingDelete) // 同步清理收藏标记，避免残留
+    removeTask(pendingDelete)
+    setPendingDelete(null)
+    toast.success(lang === 'zh' ? '已删除笔记' : 'Note deleted')
+  }
+
+  const addToCollection = (collectionId: string, noteId: string) => {
+    const c = collections.find(x => x.id === collectionId)
+    if (!c) return
+    if (c.noteIds.includes(noteId)) {
+      toast(lang === 'zh' ? '已在该分组中' : 'Already in this group')
+      return
+    }
+    setCollectionNotes(collectionId, [...c.noteIds, noteId])
+    toast.success(lang === 'zh' ? `已加入「${c.name}」` : `Added to "${c.name}"`)
+  }
+
+  // 右键菜单项：收藏 / 加入分组(子菜单) / 删除
+  const buildMenuItems = (taskId: string): ContextMenuItem[] => {
+    const isFav = favoriteNoteIds.includes(taskId)
+    const groupChildren: ContextMenuItem[] =
+      collections.length > 0
+        ? collections.map(c => ({
+            key: c.id,
+            label: c.name,
+            icon: <FolderPlus className="h-4 w-4" />,
+            disabled: c.noteIds.includes(taskId),
+            onClick: () => addToCollection(c.id, taskId),
+          }))
+        : [
+            {
+              key: '__new__',
+              label: lang === 'zh' ? '暂无分组，去新建…' : 'No groups — create…',
+              onClick: () => navigate('/collections'),
+            },
+          ]
+    return [
+      {
+        key: 'fav',
+        label: isFav
+          ? lang === 'zh' ? '取消收藏' : 'Unfavorite'
+          : lang === 'zh' ? '收藏' : 'Favorite',
+        icon: isFav ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />,
+        onClick: () => {
+          toggleFavorite(taskId)
+          toast.success(
+            isFav
+              ? lang === 'zh' ? '已取消收藏' : 'Removed from favorites'
+              : lang === 'zh' ? '已加入收藏' : 'Added to favorites',
+          )
+        },
+      },
+      {
+        key: 'group',
+        label: lang === 'zh' ? '加入分组' : 'Add to group',
+        icon: <FolderPlus className="h-4 w-4" />,
+        children: groupChildren,
+      },
+      {
+        key: 'del',
+        label: lang === 'zh' ? '删除' : 'Delete',
+        icon: <Trash2 className="h-4 w-4" />,
+        danger: true,
+        onClick: () => setPendingDelete(taskId),
+      },
+    ]
+  }
 
   return (
     <div className="vm-ws">
@@ -72,11 +175,16 @@ const WorkspaceLayout: FC<Props> = ({ Preview }) => {
               }
               const platform = t.formData?.platform || meta.platform || 'local'
               const title = meta.title || (lang === 'zh' ? '未命名笔记' : 'Untitled note')
+              const fav = favoriteNoteIds.includes(t.id)
               return (
                 <div
                   key={t.id}
                   className={'vm-note-card' + (t.id === currentTaskId ? ' active' : '')}
                   onClick={() => handleSelect(t.id)}
+                  onContextMenu={e => {
+                    e.preventDefault()
+                    setMenu({ x: e.clientX, y: e.clientY, taskId: t.id })
+                  }}
                 >
                   <NoteThumb platform={platform} coverUrl={meta.cover_url} />
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -85,6 +193,27 @@ const WorkspaceLayout: FC<Props> = ({ Preview }) => {
                       <Pf id={platform} sm />
                       <StatusBadge status={t.status} />
                     </div>
+                  </div>
+                  {/* 右侧独立列：收藏星标在上，更多菜单(⋮)在下 */}
+                  <div className="vm-card-actions-col">
+                    <button
+                      className="vm-card-act vm-card-fav"
+                      title={fav ? (lang === 'zh' ? '取消收藏' : 'Unfavorite') : (lang === 'zh' ? '收藏' : 'Favorite')}
+                      onClick={e => handleToggleFavorite(e, t.id)}
+                    >
+                      <Star size={14} strokeWidth={1.5} fill={fav ? '#FBBF24' : 'none'} />
+                    </button>
+                    <button
+                      className="vm-card-act vm-card-more"
+                      title={lang === 'zh' ? '更多' : 'More'}
+                      onClick={e => {
+                        e.stopPropagation()
+                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setMenu({ x: r.right + 4, y: r.top, taskId: t.id })
+                      }}
+                    >
+                      <MoreVertical size={14} strokeWidth={1.5} />
+                    </button>
                   </div>
                 </div>
               )
@@ -96,6 +225,38 @@ const WorkspaceLayout: FC<Props> = ({ Preview }) => {
       <div className="vm-reader" style={{ background: 'var(--vm-bg)' }}>
         {Preview}
       </div>
+
+      {/* 卡片右键菜单：收藏 / 加入分组 / 删除 */}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={buildMenuItems(menu.taskId)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+
+      {/* 删除确认弹窗（应用内，兼容桌面端 Tauri） */}
+      <Dialog open={pendingDelete !== null} onOpenChange={o => !o && setPendingDelete(null)}>
+        <DialogContent className="sm:max-w-[380px]">
+          <DialogHeader>
+            <DialogTitle>{lang === 'zh' ? '删除笔记' : 'Delete note'}</DialogTitle>
+            <DialogDescription>
+              {lang === 'zh'
+                ? '删除后不可恢复，确定删除这条笔记吗？'
+                : 'This cannot be undone. Delete this note?'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>
+              {lang === 'zh' ? '取消' : 'Cancel'}
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              {lang === 'zh' ? '删除' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

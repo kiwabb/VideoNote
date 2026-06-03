@@ -47,6 +47,7 @@ export interface Task {
   totalTokens?: number
   paused?: boolean
   createdAt: string
+  completedAt?: string // 任务变为 SUCCESS 的时间（由轮询补记）
   formData: {
     video_url: string
     link: undefined | boolean

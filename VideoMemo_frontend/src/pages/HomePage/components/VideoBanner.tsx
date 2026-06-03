@@ -48,16 +48,34 @@ export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {
 
       {/* 内容层 */}
       <div className="relative flex items-center gap-4 px-5 py-4">
-        {/* 封面缩略图：alt 留空，加载失败时不会暴露 title 文字到破图占位 */}
-        {coverUrl && (
-          <img
-            src={coverUrl}
-            alt=""
-            referrerPolicy="no-referrer"
-            onError={() => setCoverIdx(i => (i === coverIdx ? i + 1 : i))}
-            className="h-16 w-28 shrink-0 rounded-md object-cover shadow-md"
-          />
-        )}
+        {/* 封面缩略图：alt 留空，加载失败时不会暴露 title 文字到破图占位。
+            有原始链接时整张图可点击跳转原片。 */}
+        {coverUrl &&
+          (originalUrl ? (
+            <a
+              href={originalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="跳转原片"
+              className="shrink-0"
+            >
+              <img
+                src={coverUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                onError={() => setCoverIdx(i => (i === coverIdx ? i + 1 : i))}
+                className="h-16 w-28 cursor-pointer rounded-md object-cover shadow-md transition-transform hover:scale-[1.03]"
+              />
+            </a>
+          ) : (
+            <img
+              src={coverUrl}
+              alt=""
+              referrerPolicy="no-referrer"
+              onError={() => setCoverIdx(i => (i === coverIdx ? i + 1 : i))}
+              className="h-16 w-28 shrink-0 rounded-md object-cover shadow-md"
+            />
+          ))}
 
         {/* 文字信息 */}
         <div className="min-w-0 flex-1">
@@ -69,6 +87,18 @@ export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {
             {uploader && platform && <span className="text-white/40">·</span>}
             {platform && <span>{platform}</span>}
           </div>
+          {/* 视频真实链接：可点击跳转原片 */}
+          {originalUrl && (
+            <a
+              href={originalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={originalUrl}
+              className="mt-1 block max-w-full truncate text-xs text-white/60 underline-offset-2 hover:text-white hover:underline"
+            >
+              {originalUrl}
+            </a>
+          )}
         </div>
 
         {/* 跳转原视频 */}

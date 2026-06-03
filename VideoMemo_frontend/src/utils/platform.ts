@@ -17,6 +17,33 @@ export function detectPlatform(url: string): string | null {
   return null
 }
 
+/**
+ * 在原始视频链接上拼接「跳转到第 seconds 秒」的时间参数。
+ * 只有 B 站 / YouTube 支持可靠的时间戳跳转；其它平台原样返回（仍可点击打开视频）。
+ */
+export function buildVideoTimestampUrl(
+  url: string,
+  platform: string | null | undefined,
+  seconds: number,
+): string {
+  if (!url) return url
+  const p = platform || detectPlatform(url) || ''
+  try {
+    const u = new URL(url)
+    if (p === 'bilibili') {
+      u.searchParams.set('t', String(Math.max(0, Math.floor(seconds))))
+      return u.toString()
+    }
+    if (p === 'youtube') {
+      u.searchParams.set('t', `${Math.max(0, Math.floor(seconds))}s`)
+      return u.toString()
+    }
+    return url
+  } catch {
+    return url
+  }
+}
+
 /** 自定义平台缓存（由 App 启动时通过 setCustomPlatforms 注入），用于客户端 URL→平台识别。 */
 export interface CustomPlatform {
   key: string
