@@ -109,6 +109,9 @@ jobs:
         working-directory: VideoMemo_frontend
         shell: bash
         run: |
+          # 清掉 cargo 缓存（含 target/）里残留的旧版安装包，否则下方「收集产物」
+          # 的 find 会把历史版本的 dmg/exe/msi 一起捞进 Release
+          rm -rf src-tauri/target/release/bundle
           if [ "$RUNNER_OS" = "macOS" ]; then
             pnpm tauri build --bundles app
             APP="src-tauri/target/release/bundle/macos/VideoMemo.app"
